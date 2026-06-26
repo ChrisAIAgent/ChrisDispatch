@@ -2,13 +2,14 @@
 .workbuddy/
 
 # ===== 自动生成的文件（每次运行产生，不需版本控制）=====
-work/config/driver_zones.json
-work/config/orders_with_zones.json
+work/driver_zones.json
+work/orders_with_zones.json
 work/output/
 route_plan.json
 solution_*.csv
 work/zone_assignment_summary.txt
 work/zone_candidates.json
+work/inbox/Solution For One Week/
 
 # ===== 真实业务数据（含客户地址/司机信息，敏感）=====
 work/inbox/

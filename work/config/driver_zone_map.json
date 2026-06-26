@@ -1,18 +1,36 @@
 {
   "_comment": "由Web UI生成",
-  "MTL-Tony": {
-    "zones": [
-      3
-    ]
-  },
-  "MTL-Faouzi": {
+  "MTL-挂单号1": {
     "zones": [
       1
     ]
   },
-  "MTL-Luke": {
+  "MTL-Tao-2": {
+    "zones": []
+  },
+  "MTL-Ugo-2": {
+    "zones": [
+      1
+    ]
+  },
+  "MTL-Dragon-2": {
+    "zones": []
+  },
+  "MTL-Reda-2": {
+    "zones": []
+  },
+  "MTL-Anmo-2": {
+    "zones": []
+  },
+  "MTL-Achraf-2": {
+    "zones": []
+  },
+  "MTL-Pawan-2": {
     "zones": [
       2
     ]
+  },
+  "MTL-Karan-2": {
+    "zones": []
   }
 }

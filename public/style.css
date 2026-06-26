@@ -189,3 +189,70 @@ main { background: var(--bg-primary); border-radius: var(--radius-lg); border: 0
 .stop-addr { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stop-time { color: var(--text-secondary); min-width: 90px; }
 .stop-dur { color: var(--text-tertiary); min-width: 50px; }
+
+/* ═══ 负载指标样式(Step 2 画区域 + Step 4 分配司机) ═══ */
+
+/* Step 2: 区域负载指标卡片 */
+.zone-metric-item {
+  background: var(--bg-primary);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.zone-metric-item .zm-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 6px;
+}
+.zone-metric-item .zname { font-weight: 600; font-size: 13px; }
+.zone-metric-item .zm-stops { color: var(--accent); font-weight: 500; }
+.zm-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px;
+}
+.zm-cell {
+  display: flex; flex-direction: column; gap: 1px;
+}
+.zm-label { color: var(--text-tertiary); font-size: 10px; }
+.zm-val { color: var(--text-primary); font-size: 12px; font-weight: 500; }
+
+/* 区域差异汇总 */
+.zone-diff-summary {
+  margin-top: 8px; padding: 8px 10px;
+  background: var(--bg-tertiary); border-radius: 6px;
+  font-size: 11px;
+}
+.zm-diff-title { font-weight: 500; margin-bottom: 4px; color: var(--text-secondary); }
+.zm-diff-row {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  color: var(--text-secondary); margin-bottom: 4px;
+}
+.zm-warn { color: var(--warning); font-weight: 500; }
+.zm-ok { color: var(--accent); font-weight: 500; }
+
+/* Step 4: 司机负载预测 */
+.driver-row { flex-wrap: wrap; }
+.driver-info { min-width: 120px; }
+.driver-info .dname { font-weight: 500; font-size: 13px; }
+.driver-info .dcap { color: var(--text-secondary); font-size: 11px; }
+
+.driver-metrics {
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 180px; padding: 6px 10px;
+  background: var(--bg-primary); border: 0.5px solid var(--border); border-radius: 6px;
+}
+.dm-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11px;
+}
+.dm-label { color: var(--text-tertiary); }
+.dm-val { font-weight: 500; color: var(--text-primary); }
+.zm-load-ok { color: var(--accent); }
+.zm-load-over { color: var(--danger); font-weight: 600; }
+
+/* 司机间差异汇总 */
+.driver-diff-summary {
+  margin-top: 12px; padding: 10px 12px;
+  background: var(--bg-tertiary); border-radius: var(--radius);
+  font-size: 12px;
+}

@@ -2,11 +2,68 @@
 'use strict';
 
 const API = '';
+const WAREHOUSE = { lat: 45.396, lng: -73.515 };  // 仓库坐标(Candiac)
+const EST_SPEED = 40;  // 预估车速 km/h(用于调用API前的时间估算)
 let map = null, drawControl = null;
 let drawnLayers = [];     // 画的多边形图层
 let orderMarkers = [];    // 订单点标记
 let zoneColors = ['#7F77DD', '#1D9E75', '#D85A30', '#378ADD', '#EF9F27', '#D4537E'];
 let state = { orders: [], drivers: [], geojson: null, driverZoneMap: {}, tokenVerified: false };
+
+// ═══ 负载指标计算工具 ═══
+
+// Haversine 距离(km)
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// 计算一组订单的负载指标
+// ordersInZone: 该区域的订单数组
+// 返回: { stops, load, estDistance, estDuration }
+function calcZoneMetrics(ordersInZone) {
+  const stops = ordersInZone.length;
+  const load = ordersInZone.reduce((a, o) => a + (o.load || 0), 0);
+  if (stops === 0) return { stops: 0, load: 0, estDistance: 0, estDuration: 0 };
+
+  // 区域质心
+  const cLat = ordersInZone.reduce((a, o) => a + o.lat, 0) / stops;
+  const cLng = ordersInZone.reduce((a, o) => a + o.lng, 0) / stops;
+
+  // 预估距离: 仓库 → 质心 → 仓库 (往返)
+  const distToCenter = haversine(WAREHOUSE.lat, WAREHOUSE.lng, cLat, cLng);
+  const estDistance = distToCenter * 2;
+
+  // 预估时间: 往返行驶时间 + 每单服务时长
+  const driveTime = (estDistance / EST_SPEED) * 60;  // 分钟
+  const serviceTime = ordersInZone.reduce((a, o) => a + (o.duration || 10), 0);
+  const estDuration = Math.round(driveTime + serviceTime);
+
+  return { stops, load, estDistance: Math.round(estDistance * 10) / 10, estDuration };
+}
+
+// 获取区域内的订单
+function getOrdersInZone(zoneIdx) {
+  if (!drawnLayers[zoneIdx]) return [];
+  const latlngs = drawnLayers[zoneIdx].getLatLngs()[0];
+  return state.orders.filter(o => pointInLayer([o.lat, o.lng], latlngs));
+}
+
+// 按司机分配计算负载(Step 4 用)
+function calcDriverMetrics(driverId, zones) {
+  let allOrders = [];
+  if (zones && zones.length) {
+    for (const zId of zones) {
+      // zId 是 1-based
+      const orders = getOrdersInZone(zId - 1);
+      allOrders = allOrders.concat(orders);
+    }
+  }
+  return calcZoneMetrics(allOrders);
+}
 
 // ═══ 步骤导航 ═══
 function goToStep(n) {
@@ -107,19 +164,58 @@ function initMap() {
 function updateZoneList() {
   const list = document.getElementById('zone-list');
   list.innerHTML = '';
+  const allMetrics = [];
   drawnLayers.forEach((layer, i) => {
     const latlngs = layer.getLatLngs()[0];
-    let count = 0;
-    for (const o of state.orders) {
-      if (pointInLayer([o.lat, o.lng], latlngs)) count++;
-    }
+    const ordersInZone = state.orders.filter(o => pointInLayer([o.lat, o.lng], latlngs));
+    const m = calcZoneMetrics(ordersInZone);
+    allMetrics.push(m);
     const color = zoneColors[i % zoneColors.length];
     layer.setStyle({ color: color, fillColor: color, fillOpacity: 0.15 });
+
     const div = document.createElement('div');
-    div.className = 'zone-item';
-    div.innerHTML = '<div style="display:flex;align-items:center"><span class="zone-color" style="background:' + color + '"></span><span class="zname">Z' + (i + 1) + '</span></div><span class="zcount">' + count + ' 单</span>';
+    div.className = 'zone-metric-item';
+    div.style.borderLeft = '3px solid ' + color;
+    div.innerHTML =
+      '<div class="zm-header"><span class="zname">Z' + (i + 1) + '</span><span class="zm-stops">' + m.stops + ' 单</span></div>' +
+      '<div class="zm-grid">' +
+        '<div class="zm-cell"><span class="zm-label">箱数</span><span class="zm-val">' + m.load + '</span></div>' +
+        '<div class="zm-cell"><span class="zm-label">预估距离</span><span class="zm-val">' + m.estDistance + ' km</span></div>' +
+        '<div class="zm-cell"><span class="zm-label">预估时间</span><span class="zm-val">' + m.estDuration + ' min</span></div>' +
+      '</div>';
     list.appendChild(div);
   });
+
+  // 显示区域间差异汇总
+  if (allMetrics.length >= 2) {
+    const stopVals = allMetrics.map(m => m.stops);
+    const loadVals = allMetrics.map(m => m.load);
+    const distVals = allMetrics.map(m => m.estDistance);
+    const durVals = allMetrics.map(m => m.estDuration);
+    const max = arr => Math.max(...arr);
+    const min = arr => Math.min(...arr);
+
+    const stopDiff = max(stopVals) - min(stopVals);
+    const loadDiff = max(loadVals) - min(loadVals);
+
+    const summary = document.createElement('div');
+    summary.className = 'zone-diff-summary';
+    let warning = '';
+    if (stopDiff > 8) warning = '<span class="zm-warn">⚠ 停点数差异 ' + stopDiff + ' > 8,建议调整区域边界</span>';
+    else if (loadDiff > 60) warning = '<span class="zm-warn">⚠ 箱数差异 ' + loadDiff + ' 较大,注意负载平衡</span>';
+    else warning = '<span class="zm-ok">✓ 负载差异在合理范围</span>';
+
+    summary.innerHTML =
+      '<div class="zm-diff-title">区域间差异(max-min)</div>' +
+      '<div class="zm-diff-row">' +
+        '<span>停点: ' + stopDiff + '</span>' +
+        '<span>箱数: ' + loadDiff + '</span>' +
+        '<span>距离: ' + (max(distVals) - min(distVals)).toFixed(1) + ' km</span>' +
+        '<span>时间: ' + (max(durVals) - min(durVals)) + ' min</span>' +
+      '</div>' +
+      warning;
+    list.appendChild(summary);
+  }
 }
 
 function pointInLayer(pt, latlngs) {
@@ -313,13 +409,71 @@ function renderDriverAssign() {
     for (let z = 1; z <= zoneCount; z++) opts += '<option value="' + z + '">Z' + z + '</option>';
     const currentZones = (state.driverZoneMap[d.id] || {}).zones || [];
     const thumb = renderZoneThumbnail(d.id, currentZones);
-    row.innerHTML = thumb + '<span class="dname">' + d.id + '</span><span class="dcap">cap=' + d.capacity + '</span><select id="zone-select-' + d.id + '" multiple style="min-width:200px;height:60px" onchange="onZoneSelectChange(\'' + d.id + '\')">' + opts + '</select>';
+    const m = calcDriverMetrics(d.id, currentZones);
+
+    // 负载预测
+    const overCap = m.load > d.capacity;
+    const loadClass = overCap ? 'zm-load-over' : 'zm-load-ok';
+    const loadWarn = overCap ? '<span class="zm-warn">⚠ 超容量 +' + (m.load - d.capacity) + '</span>' : '';
+
+    row.innerHTML =
+      thumb +
+      '<div class="driver-info">' +
+        '<div class="dname">' + d.id + '</div>' +
+        '<div class="dcap">cap=' + d.capacity + '</div>' +
+      '</div>' +
+      '<select id="zone-select-' + d.id + '" multiple style="min-width:160px;height:60px" onchange="onZoneSelectChange(\'' + d.id + '\')">' + opts + '</select>' +
+      '<div class="driver-metrics" id="dm-' + d.id + '">' +
+        '<div class="dm-row"><span class="dm-label">单量</span><span class="dm-val">' + m.stops + '</span></div>' +
+        '<div class="dm-row"><span class="dm-label">箱数</span><span class="dm-val ' + loadClass + '">' + m.load + ' / ' + d.capacity + '</span></div>' +
+        '<div class="dm-row"><span class="dm-label">距离</span><span class="dm-val">' + m.estDistance + ' km</span></div>' +
+        '<div class="dm-row"><span class="dm-label">时间</span><span class="dm-val">' + m.estDuration + ' min</span></div>' +
+        loadWarn +
+      '</div>';
     list.appendChild(row);
     const sel = document.getElementById('zone-select-' + d.id);
     for (const z of currentZones) {
       for (const opt of sel.options) if (parseInt(opt.value) === z) opt.selected = true;
     }
   }
+  updateDriverDiffSummary();
+}
+
+// 更新司机间差异汇总
+function updateDriverDiffSummary() {
+  let existing = document.getElementById('driver-diff-summary');
+  if (existing) existing.remove();
+
+  const metrics = state.drivers.map(d => {
+    const zones = (state.driverZoneMap[d.id] || {}).zones || [];
+    return calcDriverMetrics(d.id, zones);
+  });
+
+  if (metrics.length < 2) return;
+  const max = arr => Math.max(...arr);
+  const min = arr => Math.min(...arr);
+  const stopDiff = max(metrics.map(m => m.stops)) - min(metrics.map(m => m.stops));
+  const loadDiff = max(metrics.map(m => m.load)) - min(metrics.map(m => m.load));
+  const distDiff = max(metrics.map(m => m.estDistance)) - min(metrics.map(m => m.estDistance));
+  const durDiff = max(metrics.map(m => m.estDuration)) - min(metrics.map(m => m.estDuration));
+
+  const summary = document.createElement('div');
+  summary.id = 'driver-diff-summary';
+  summary.className = 'driver-diff-summary';
+  let warn = '';
+  if (stopDiff > 8) warn = '<span class="zm-warn">⚠ 停点数差异 ' + stopDiff + ' > 8</span>';
+  else warn = '<span class="zm-ok">✓ 停点数差异 ' + stopDiff + ' (≤8)</span>';
+
+  summary.innerHTML =
+    '<div class="zm-diff-title">司机间负载差异(max-min)</div>' +
+    '<div class="zm-diff-row">' +
+      '<span>停点: ' + stopDiff + '</span>' +
+      '<span>箱数: ' + loadDiff + '</span>' +
+      '<span>距离: ' + distDiff.toFixed(1) + ' km</span>' +
+      '<span>时间: ' + durDiff + ' min</span>' +
+    '</div>' + warn;
+
+  document.getElementById('driver-assign-list').appendChild(summary);
 }
 
 function onZoneSelectChange(driverId) {
@@ -333,8 +487,27 @@ function onZoneSelectChange(driverId) {
   const newThumb = document.createElement('div');
   newThumb.innerHTML = renderZoneThumbnail(driverId, zones);
   oldThumb.replaceWith(newThumb.firstChild);
+
+  // 更新负载指标
+  const d = state.drivers.find(x => x.id === driverId);
+  const m = calcDriverMetrics(driverId, zones);
+  const dmDiv = document.getElementById('dm-' + driverId);
+  if (dmDiv && d) {
+    const overCap = m.load > d.capacity;
+    const loadClass = overCap ? 'zm-load-over' : 'zm-load-ok';
+    const loadWarn = overCap ? '<span class="zm-warn">⚠ 超容量 +' + (m.load - d.capacity) + '</span>' : '';
+    dmDiv.innerHTML =
+      '<div class="dm-row"><span class="dm-label">单量</span><span class="dm-val">' + m.stops + '</span></div>' +
+      '<div class="dm-row"><span class="dm-label">箱数</span><span class="dm-val ' + loadClass + '">' + m.load + ' / ' + d.capacity + '</span></div>' +
+      '<div class="dm-row"><span class="dm-label">距离</span><span class="dm-val">' + m.estDistance + ' km</span></div>' +
+      '<div class="dm-row"><span class="dm-label">时间</span><span class="dm-val">' + m.estDuration + ' min</span></div>' +
+      loadWarn;
+  }
+
   // 更新总览图
   renderZoneOverview();
+  // 更新差异汇总
+  updateDriverDiffSummary();
 }
 
 function saveDriverZones() {
