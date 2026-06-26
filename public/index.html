@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MTL远线分单控制台</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h2 class="sr-only">MTL远线分单控制台 - 从订单上传到一键分单的完整流程</h2>
+
+  <div id="app">
+    <header>
+      <h1>MTL远线分单控制台</h1>
+      <span id="status-badge" class="badge">就绪</span>
+    </header>
+
+    <nav id="stepper">
+      <div class="step active" data-step="1"><span class="num">1</span> 上传订单</div>
+      <div class="step" data-step="2"><span class="num">2</span> 画区域</div>
+      <div class="step" data-step="3"><span class="num">3</span> 导入司机</div>
+      <div class="step" data-step="4"><span class="num">4</span> 分配区域</div>
+      <div class="step" data-step="5"><span class="num">5</span> 验证Token</div>
+      <div class="step" data-step="6"><span class="num">6</span> 一键分单</div>
+    </nav>
+
+    <main id="content">
+      <!-- Step 1: 上传订单 -->
+      <section class="panel active" id="panel-1">
+        <h2>上传今日订单</h2>
+        <p class="hint">拖入或选择订单 xlsx 文件，系统会自动解析订单点并显示在地图上</p>
+        <div class="upload-area" id="orders-drop">
+          <input type="file" id="orders-file" accept=".xlsx" hidden>
+          <p>点击或拖入 .xlsx 文件</p>
+        </div>
+        <div id="orders-result" class="result-area"></div>
+        <button class="btn-primary" onclick="goToStep(2)" id="btn-step1-next" disabled>下一步：画区域</button>
+      </section>
+
+      <!-- Step 2: 画区域 -->
+      <section class="panel" id="panel-2">
+        <h2>在地图上画配送区域</h2>
+        <p class="hint">蓝色点为订单位置。用左侧工具画多边形，每个多边形是一个区域(Z1/Z2/Z3...)</p>
+        <div id="map-container">
+          <div id="map"></div>
+          <div id="zone-sidebar">
+            <h3>已画区域</h3>
+            <div id="zone-list"></div>
+            <button class="btn-small" onclick="clearZones()">清除全部</button>
+            <button class="btn-small" onclick="useLastGeojson()">沿用上次区域</button>
+          </div>
+        </div>
+        <div id="zones-result" class="result-area"></div>
+        <button class="btn-secondary" onclick="goToStep(1)">上一步</button>
+        <button class="btn-primary" onclick="saveZones()" id="btn-step2-next">保存区域，下一步</button>
+      </section>
+
+      <!-- Step 3: 导入司机 -->
+      <section class="panel" id="panel-3">
+        <h2>导入司机表格</h2>
+        <p class="hint">上传司机信息 xlsx，系统会自动解析司机名单</p>
+        <div class="upload-area" id="drivers-drop">
+          <input type="file" id="drivers-file" accept=".xlsx" hidden>
+          <p>点击或拖入司机 .xlsx 文件</p>
+        </div>
+        <div id="drivers-result" class="result-area"></div>
+        <button class="btn-secondary" onclick="goToStep(2)">上一步</button>
+        <button class="btn-primary" onclick="goToStep(4)" id="btn-step3-next" disabled>下一步：分配区域</button>
+      </section>
+
+      <!-- Step 4: 分配区域 -->
+      <section class="panel" id="panel-4">
+        <h2>分配区域给司机</h2>
+        <p class="hint">为每个司机选择负责的区域，右侧缩略图实时显示该司机负责的区域轮廓</p>
+        <div id="zone-overview"></div>
+        <div id="driver-assign-list"></div>
+        <button class="btn-secondary" onclick="goToStep(3)">上一步</button>
+        <button class="btn-primary" onclick="saveDriverZones()">保存分配，下一步</button>
+      </section>
+
+      <!-- Step 5: 验证Token -->
+      <section class="panel" id="panel-5">
+        <h2>验证 Routific Token</h2>
+        <p class="hint">粘贴你的 Routific API token，验证通过后才能进行分单。Token 仅存在内存中，服务关闭即消失。</p>
+        <div class="input-group">
+          <input type="password" id="token-input" placeholder="粘贴 Routific token (eyJ...)" style="width:60%">
+          <button class="btn-primary" onclick="verifyToken()" id="btn-verify">验证</button>
+        </div>
+        <div id="token-result" class="result-area"></div>
+        <button class="btn-secondary" onclick="goToStep(4)">上一步</button>
+        <button class="btn-primary" onclick="goToStep(6)" id="btn-step5-next" disabled>下一步：一键分单</button>
+      </section>
+
+      <!-- Step 6: 一键分单 -->
+      <section class="panel" id="panel-6">
+        <h2>一键分单</h2>
+        <div id="run-summary" class="summary-card">
+          <p>确认以下信息无误后点击分单：</p>
+          <div id="run-checklist"></div>
+        </div>
+        <button class="btn-run" onclick="runPipeline()" id="btn-run">开始分单</button>
+        <div id="run-progress" class="result-area" style="display:none"></div>
+        <div id="run-result"></div>
+        <div id="adjust-area" style="display:none">
+          <h3 style="margin-top:20px">手动调整停点顺序</h3>
+          <p class="hint">拖拽行可调整顺序。调整后点击"保存调整"，时间将按新顺序+车速40km/h重新估算。</p>
+          <div id="stop-list-container"></div>
+          <button class="btn-primary" onclick="saveAdjustedPlan()">保存调整</button>
+          <button class="btn-secondary" onclick="exportSolution()">重新导出Solution</button>
+          <div id="adjust-result" class="result-area"></div>
+        </div>
+        <button class="btn-secondary" onclick="goToStep(5)">上一步</button>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

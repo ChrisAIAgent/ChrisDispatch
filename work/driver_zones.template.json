@@ -1,0 +1,19 @@
+{
+  "_comment": "【schema 参考】driver_zones.json 现由 parse-drivers.js 自动生成,勿手改。配置入口:仓库/班次/选项 -> work/config/settings.json;司机->区域映射 -> work/config/driver_zone_map.json。本文件展示生成结果的字段结构。",
+  "_schema": {
+    "routingMode": "all_in_one | per_driver_zone",
+    "warehouse": { "name": "string", "lat": "number", "lng": "number" },
+    "shift": { "start": "HH:MM", "end": "HH:MM" },
+    "options": { "traffic": "fast|slow", "max_visit_lateness": "number(min)", "max_vehicle_overtime": "number(min)", "polylines": "boolean" },
+    "drivers": [
+      {
+        "id": "司机Excel Driver Name 列的值",
+        "nickname": "去掉 MTL- 前缀",
+        "capacity": "number(来自Excel Capacity列)",
+        "types": ["ref"],
+        "start": "邮编(从 Start Address 抽取,信息字段,pipeline 实际用 warehouse 作起终点)",
+        "zones": "number[](来自 driver_zone_map.json)"
+      }
+    ]
+  }
+}
