@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChrisDispatch MVP — 区域规划工具</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    #app { display: flex; height: 100vh; }
+    #sidebar { width: 320px; background: #f8f9fa; border-right: 1px solid #dee2e6; padding: 16px; overflow-y: auto; box-sizing: border-box; }
+    #map { flex: 1; }
+    h1 { font-size: 18px; margin: 0 0 6px; color: #2c3e50; }
+    .subtitle { font-size: 12px; color: #6c757d; margin-bottom: 14px; }
+    h2 { font-size: 14px; margin: 14px 0 8px; color: #495057; }
+    .step { background: white; padding: 12px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #e9ecef; }
+    .step-num { display: inline-block; width: 22px; height: 22px; background: #3498db; color: white; border-radius: 50%; text-align: center; line-height: 22px; font-size: 13px; margin-right: 6px; }
+    .file-input-wrap { display: inline-block; padding: 6px 12px; background: #3498db; color: white; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    .file-input-wrap:hover { background: #2980b9; }
+    .file-input-wrap input { display: none; }
+    #file-status { font-size: 12px; color: #6c757d; margin-top: 8px; word-break: break-all; }
+    #file-info { font-size: 12px; color: #495057; margin-top: 8px; line-height: 1.6; }
+    .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; background: #6c757d; color: white; margin-right: 6px; }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: #3498db; }
+    .btn-mini { padding: 2px 6px; font-size: 11px; border: none; background: transparent; cursor: pointer; }
+    .btn-mini:hover { background: #e9ecef; border-radius: 3px; }
+    .btn-mini.danger { color: #e74c3c; }
+    .zone-card { background: white; padding: 8px 10px; margin-bottom: 6px; border-radius: 4px; font-size: 13px; }
+    .zone-title { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+    .zone-id { font-weight: bold; color: #2c3e50; flex: 1; }
+    .zone-stats { display: flex; gap: 14px; color: #6c757d; font-size: 12px; }
+    .zone-stats b { color: #2c3e50; font-size: 14px; }
+    .zone-summary { background: #e8f4f8; padding: 8px 10px; border-radius: 4px; font-size: 12px; margin-top: 8px; line-height: 1.6; }
+    .zone-summary b { color: #2980b9; }
+    .hint { font-size: 12px; color: #95a5a6; font-style: italic; padding: 12px 8px; }
+    .footer { font-size: 11px; color: #95a5a6; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e9ecef; line-height: 1.6; }
+    .warehouse-icon { font-size: 16px; text-align: center; line-height: 24px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <h1>🗺️ ChrisDispatch MVP</h1>
+      <div class="subtitle">区域规划工具 · 纯前端版</div>
+
+      <div class="step">
+        <h2><span class="step-num">1</span>上传订单 Excel</h2>
+        <label class="file-input-wrap">
+          选择 .xlsx 文件
+          <input type="file" id="file-input" accept=".xlsx">
+        </label>
+        <div id="file-status">尚未上传文件</div>
+        <div id="file-info"></div>
+      </div>
+
+      <div class="step">
+        <h2><span class="step-num">2</span>绘制区域</h2>
+        <div style="font-size: 12px; color: #6c757d; line-height: 1.6;">
+          点击地图左上角多边形工具 📐 → 画封闭区域 → 自动统计
+        </div>
+      </div>
+
+      <div class="step">
+        <h2><span class="step-num">3</span>区域统计</h2>
+        <div id="zone-panel">
+          <div class="hint">在地图上点击多边形工具 📐 画第一个区域</div>
+        </div>
+        <div style="margin-top: 10px;">
+          <button id="btn-clear" class="btn">清空区域</button>
+          <button id="btn-export" class="btn btn-primary">导出 GeoJSON</button>
+        </div>
+      </div>
+
+      <div class="footer">
+        V1 · 纯前端 · 数据保存在浏览器 localStorage<br>
+        司机分配 / Token / Routific:截断到 V2
+      </div>
+    </aside>
+    <div id="map"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="xlsx.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
