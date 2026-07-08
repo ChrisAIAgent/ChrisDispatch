@@ -1,4 +1,4 @@
-// ChrisDispatch MVP - 纯前端: 上传 -> 画区 -> 看统计
+﻿// ChrisDispatch MVP - 纯前端: 上传 -> 画区 -> 看统计
 (function () {
   'use strict';
 
@@ -8,7 +8,7 @@
     lat: ['lat', 'latitude', '纬度'],
     lng: ['lng', 'lon', 'long', 'longitude', '经度'],
     boxes: ['boxes', 'box', 'parcels', 'parcel', 'qty', 'quantity', '件数', '箱数', '数量'],
-    address: ['address', 'street', 'addr', '地址', '收货地址'],
+    address: ['address', 'street', 'addr', '地址', '收件地址'],
     city: ['city', 'town', '城市'],
   };
   const ZONE_COLORS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#34495e','#16a085','#c0392b'];
@@ -37,6 +37,14 @@
     for (const a of aliases) { const i = lower.findIndex(h => h.includes(a.toLowerCase())); if (i >= 0) return i; }
     return -1;
   }
+  // 健壮的箱数解析: 处理千分位逗号、空格、空白值、负数
+  function parseBoxCount(val) {
+    if (val == null) return null;
+    const s = String(val).trim().replace(/[,\s_]/g, '');
+    if (!s) return null;
+    const n = parseFloat(s);
+    return isFinite(n) && n >= 0 ? n : null;
+  }
   function pointInPolygon(pt, ring) {
     const x = pt.lng, y = pt.lat;
     let inside = false;
@@ -63,13 +71,18 @@
       if (latIdx < 0 || lngIdx < 0) throw new Error(`未找到 lat/lng 列。识别到的列: [${headers.join(', ')}]`);
 
       const points = []; let skipped = 0;
+      const boxValues = []; let missingBoxes = 0;
       for (let i = 1; i < rows.length; i++) {
         const r = rows[i];
         const lat = parseFloat(r[latIdx]), lng = parseFloat(r[lngIdx]);
         if (!isFinite(lat) || !isFinite(lng)) { skipped++; continue; }
+        const boxRaw = boxesIdx >= 0 ? r[boxesIdx] : null;
+        const boxVal = parseBoxCount(boxRaw);
+        if (boxVal == null) missingBoxes++;
+        else boxValues.push(boxVal);
         points.push({
           lat, lng,
-          boxes: boxesIdx >= 0 ? (parseFloat(r[boxesIdx]) || 1) : 1,
+          boxes: boxVal != null ? boxVal : 1,
           address: addrIdx >= 0 ? String(r[addrIdx] || '') : '',
           city: cityIdx >= 0 ? String(r[cityIdx] || '') : '',
           rowIdx: i,
@@ -78,11 +91,34 @@
       state.rows = rows; state.headers = headers; state.points = points;
 
       const totalBoxes = points.reduce((s, p) => s + p.boxes, 0);
+      const stats = boxValues.length ? {
+        min: Math.min(...boxValues),
+        max: Math.max(...boxValues),
+        avg: boxValues.reduce((a, b) => a + b, 0) / boxValues.length,
+        unique: new Set(boxValues).size,
+        sample: boxValues.slice(0, 8),
+      } : null;
+
       $('file-status').textContent = `✅ 已加载 ${points.length} 个停点(跳过 ${skipped} 行无效数据)`;
+
+      let statsHtml = '';
+      if (stats) {
+        statsHtml =
+          `<div><b>箱数分布:</b> 最小=${stats.min}, 最大=${stats.max}, ` +
+          `平均=${stats.avg.toFixed(2)}, 唯一值数=${stats.unique}</div>` +
+          `<div><b>样本前 8:</b> [${stats.sample.join(', ')}]</div>`;
+      } else if (boxesIdx >= 0) {
+        statsHtml = `<div style="color:#e74c3c"><b>⚠️ 箱数列全部无法解析,已按默认 1 计</b></div>`;
+      }
+      if (missingBoxes > 0) {
+        statsHtml += `<div style="color:#e67e22"><b>⚠️ 缺失/无效 ${missingBoxes} 行(已按默认 1 计)</b></div>`;
+      }
+
       $('file-info').innerHTML =
         `<div><b>列识别:</b> lat=${esc(headers[latIdx])}, lng=${esc(headers[lngIdx])}, ` +
         `boxes=${esc(headers[boxesIdx] || '未识别(默认1)')}, address=${esc(headers[addrIdx] || '未识别')}</div>` +
-        `<div><b>总箱数:</b> ${totalBoxes}</div>`;
+        `<div><b>总箱数:</b> ${totalBoxes}</div>` +
+        statsHtml;
       renderPoints();
       recomputeZones();
     } catch (err) {
@@ -99,83 +135,77 @@
     pointLayer = L.layerGroup().addTo(map);
 
     L.marker([WAREHOUSE.lat, WAREHOUSE.lng], {
-      icon: L.divIcon({ className: 'warehouse-icon', html: '<b>🏭</b>', iconSize: [24, 24] })
+      icon: L.divIcon({ className: 'warehouse-icon', html: '<b>🏭</b>', iconSize: [24, 24], iconAnchor: [12, 12] }),
     }).addTo(map).bindPopup(`<b>仓库</b><br>${WAREHOUSE.name}`);
 
-    map.addControl(new L.Control.Draw({
+    map.on('draw:created', e => {
+      if (e.layerType !== 'polygon') return;
+      const layer = e.layer;
+      const id = nextZoneId++;
+      const color = ZONE_COLORS[(id - 1) % ZONE_COLORS.length];
+      layer.setStyle({ color, fillColor: color, fillOpacity: 0.2, weight: 2 });
+      drawnItems.addLayer(layer);
+      const latlngs = layer.getLatLngs()[0].map(p => [p.lat, p.lng]);
+      state.polygons.push({ id, name: `Z${id}`, color, layer, geom: latlngs });
+      recomputeZones();
+      saveToStorage();
+    });
+    map.on('draw:edited', () => {
+      state.polygons.forEach(p => {
+        p.geom = p.layer.getLatLngs()[0].map(q => [q.lat, q.lng]);
+      });
+      recomputeZones();
+      saveToStorage();
+    });
+    map.on('draw:deleted', e => {
+      e.layers.eachLayer(layer => {
+        const idx = state.polygons.findIndex(p => p.layer === layer);
+        if (idx >= 0) state.polygons.splice(idx, 1);
+      });
+      recomputeZones();
+      saveToStorage();
+    });
+
+    const drawControl = new L.Control.Draw({
       edit: { featureGroup: drawnItems, remove: true },
       draw: {
-        polygon: { allowIntersection: false, showArea: true, shapeOptions: { color: '#e74c3c', weight: 2 } },
-        polyline: false, rectangle: false, circle: false, circlemarker: false, marker: false,
-      }
-    }));
-
-    map.on(L.Draw.Event.CREATED, onPolygonCreated);
-    map.on(L.Draw.Event.EDITED, onPolygonsEdited);
-    map.on(L.Draw.Event.DELETED, onPolygonsDeleted);
-
-    loadFromStorage();
+        polygon: { allowIntersection: false, showArea: true, shapeOptions: { color: '#3498db', weight: 2 } },
+        polyline: false, rectangle: false, circle: false, marker: false, circlemarker: false,
+      },
+    });
+    map.addControl(drawControl);
   }
 
   function renderPoints() {
     pointLayer.clearLayers();
-    if (!state.points.length) return;
-    const markers = state.points.map((p, i) => {
-      const m = L.circleMarker([p.lat, p.lng], { radius: 4, color: '#2c3e50', fillColor: '#3498db', fillOpacity: 0.7, weight: 1 });
-      m.bindTooltip(`${i+1}. ${p.address || ''}<br>${p.city || ''}<br>📦 ${p.boxes} 箱`, { sticky: true });
-      m._pointIdx = i;
-      return m;
+    state.points.forEach((p, i) => {
+      const m = L.circleMarker([p.lat, p.lng], { radius: 4, color: '#2c3e50', fillColor: '#3498db', fillOpacity: 0.85, weight: 1 });
+      m.bindPopup(
+        `<b>#${i + 1}</b> 箱数: ${p.boxes}` +
+        (p.address ? `<br>${esc(p.address)}` : '') +
+        (p.city ? `<br>${esc(p.city)}` : '')
+      );
+      pointLayer.addLayer(m);
     });
-    markers.forEach(m => m.addTo(pointLayer));
-    map.fitBounds(L.featureGroup(markers).getBounds().pad(0.1));
   }
-
-  function onPolygonCreated(e) {
-    const layer = e.layer;
-    const color = ZONE_COLORS[state.polygons.length % ZONE_COLORS.length];
-    layer.setStyle({ color, fillColor: color, fillOpacity: 0.2, weight: 2 });
-    const id = `Z${nextZoneId++}`;
-    const latlngs = layer.getLatLngs()[0].map(ll => [ll.lat, ll.lng]);
-    drawnItems.addLayer(layer);
-    state.polygons.push({ id, name: id, color, layer, geom: latlngs });
-    recomputeZones();
-    saveToStorage();
-  }
-  function onPolygonsEdited(e) {
-    e.layers.eachLayer(layer => {
-      const poly = state.polygons.find(p => p.layer === layer);
-      if (poly) poly.geom = layer.getLatLngs()[0].map(ll => [ll.lat, ll.lng]);
-    });
-    recomputeZones();
-    saveToStorage();
-  }
-  function onPolygonsDeleted(e) {
-    e.layers.eachLayer(layer => {
-      const idx = state.polygons.findIndex(p => p.layer === layer);
-      if (idx >= 0) state.polygons.splice(idx, 1);
-    });
-    recomputeZones();
-    saveToStorage();
-  }
-
   function recomputeZones() {
     state.zonePoints.clear();
     state.polygons.forEach(p => state.zonePoints.set(p.id, []));
-    state.points.forEach((pt, i) => {
+    state.points.forEach((p, i) => {
       for (const poly of state.polygons) {
-        if (pointInPolygon(pt, poly.geom)) { state.zonePoints.get(poly.id).push(i); break; }
+        if (pointInPolygon(p, poly.geom)) { state.zonePoints.get(poly.id).push(i); break; }
       }
     });
+    paintPointColors();
     renderZonePanel();
-    highlightPoints();
   }
-
-  function highlightPoints() {
+  function paintPointColors() {
     pointLayer.eachLayer(m => {
-      const i = m._pointIdx;
       let color = '#3498db', radius = 4;
+      const idx = state.points.findIndex(p => p.lat === m.getLatLng().lat && p.lng === m.getLatLng().lng);
+      if (idx < 0) return;
       for (const poly of state.polygons) {
-        if (state.zonePoints.get(poly.id).includes(i)) { color = poly.color; radius = 5; break; }
+        if (state.zonePoints.get(poly.id).includes(idx)) { color = poly.color; radius = 5; break; }
       }
       m.setStyle({ fillColor: color, color: '#2c3e50', radius, fillOpacity: 0.85, weight: 1 });
     });
@@ -185,10 +215,9 @@
     const panel = $('zone-panel');
     panel.innerHTML = '';
     if (!state.polygons.length) {
-      panel.appendChild(el('div', { class: 'hint' }, '在地图上点击多边形工具 📐 画第一个区域'));
+      panel.appendChild(el('div', { class: 'hint' }, '在地图上点击多边形工具 🔺 画第一个区域'));
       return;
     }
-    const totals = computeTotals();
     state.polygons.forEach(poly => {
       const ptIdxs = state.zonePoints.get(poly.id) || [];
       const stopCount = ptIdxs.length;
@@ -197,7 +226,7 @@
         el('div', { class: 'zone-title' },
           el('span', { class: 'zone-id' }, poly.name),
           el('button', { class: 'btn-mini', onclick: () => renameZone(poly.id) }, '✏️'),
-          el('button', { class: 'btn-mini danger', onclick: () => deleteZone(poly.id) }, '🗑'),
+          el('button', { class: 'btn-mini danger', onclick: () => deleteZone(poly.id) }, '🗑️'),
         ),
         el('div', { class: 'zone-stats' },
           el('div', null, '停点 ', el('b', null, String(stopCount))),
@@ -206,6 +235,7 @@
       );
       panel.appendChild(card);
     });
+    const totals = computeTotals();
     panel.appendChild(el('div', { class: 'zone-summary' },
       el('div', null, '已覆盖 ', el('b', null, `${totals.coveredStops}/${totals.totalStops}`), ' 停点'),
       el('div', null, '已覆盖 ', el('b', null, `${totals.coveredBoxes}/${totals.totalBoxes}`), ' 箱'),
@@ -289,6 +319,7 @@
 
   window.addEventListener('DOMContentLoaded', () => {
     initMap();
+    loadFromStorage();
     $('file-input').addEventListener('change', e => { const f = e.target.files[0]; if (f) handleFile(f); });
     $('btn-clear').addEventListener('click', clearAll);
     $('btn-export').addEventListener('click', exportGeoJSON);
